@@ -1,267 +1,307 @@
-
 import torch
-import sys
 import numpy as np
-import time
-sys.path.append('/mnt/intelpa-2/rehman/UnsupervisedPhones')
-from modules.p2allophones.GPUKmeans.gpu_kmeans import GPUKMeans
+
+from gpu_kmeans import GPUKMeans
+from dim_reducer import Reducer
 
 
+# Example usage of GPUKMeans with integrated dimensionality reduction
 
-
-torch.manual_seed(42)
-
+def example_usage():
+    # Generate some example data
+    np.random.seed(42)
+    n_samples = 1000
+    n_features = 100
+    X = np.random.randn(n_samples, n_features)
     
-def create_dummy_data(n_samples=10000, n_features=90, n_clusters_true=5, device="cuda:0", random_state=42):
-    """
-    Create dummy data with known cluster structure for testing
+    print("=== GPUKMeans with Dimensionality Reduction Example ===")
+    print(f"Original data shape: {X.shape}")
     
-    Args:
-        n_samples: Number of data points
-        n_features: Number of features
-        n_clusters_true: Number of true clusters to generate
-        device: Device to create data on
-        random_state: Random seed for reproducibility
-    
-    Returns:
-        X: Data tensor of shape (n_samples, n_features)
-        y_true: True cluster labels
-    """
-    
-    np.random.seed(random_state)
-    
-    print(f"Creating dummy data: {n_samples} samples, {n_features} features, {n_clusters_true} true clusters")
-    
-    # Create cluster centers
-    cluster_centers = torch.randn(n_clusters_true, n_features, device=device) * 5
-    
-    # Assign samples to clusters
-    samples_per_cluster = n_samples // n_clusters_true
-    remainder = n_samples % n_clusters_true
-    
-    X = torch.zeros(n_samples, n_features, device=device)
-    y_true = torch.zeros(n_samples, dtype=torch.long, device=device)
-    
-    start_idx = 0
-    for i in range(n_clusters_true):
-        # Add extra sample to first clusters if there's a remainder
-        end_idx = start_idx + samples_per_cluster + (1 if i < remainder else 0)
-        
-        # Generate samples around cluster center
-        n_cluster_samples = end_idx - start_idx
-        cluster_data = torch.randn(n_cluster_samples, n_features, device=device) * 1.5
-        cluster_data += cluster_centers[i].unsqueeze(0)
-        
-        X[start_idx:end_idx] = cluster_data
-        y_true[start_idx:end_idx] = i
-        
-        start_idx = end_idx
-    
-    # Shuffle the data
-    indices = torch.randperm(n_samples, device=device)
-    X = X[indices]
-    y_true = y_true[indices]
-    
-    print(f"Data created successfully on device: {X.device}")
-    print(f"Data shape: {X.shape}")
-    print(f"Data memory usage: {X.element_size() * X.nelement() / 1024**2:.2f} MB")
-    
-    return X, y_true
-
-def calculate_clustering_metrics(y_true, y_pred):
-    """
-    Calculate basic clustering metrics
-    
-    Args:
-        y_true: True cluster labels
-        y_pred: Predicted cluster labels
-    
-    Returns:
-        Dictionary with metrics
-    """
-    # Convert to numpy if needed
-    if isinstance(y_true, torch.Tensor):
-        y_true = y_true.cpu().numpy()
-    if isinstance(y_pred, torch.Tensor):
-        y_pred = y_pred.cpu().numpy()
-    
-    # Calculate purity (simplified metric)
-    n_samples = len(y_true)
-    n_clusters_pred = len(np.unique(y_pred))
-    n_clusters_true = len(np.unique(y_true))
-    
-    # For each predicted cluster, find the most common true label
-    cluster_purities = []
-    for cluster_id in np.unique(y_pred):
-        cluster_mask = y_pred == cluster_id
-        cluster_true_labels = y_true[cluster_mask]
-        
-        if len(cluster_true_labels) > 0:
-            # Find most common true label in this cluster
-            unique_labels, counts = np.unique(cluster_true_labels, return_counts=True)
-            max_count = np.max(counts)
-            purity = max_count / len(cluster_true_labels)
-            cluster_purities.append(purity)
-    
-    overall_purity = np.mean(cluster_purities) if cluster_purities else 0.0
-    
-    return {
-        'n_samples': n_samples,
-        'n_clusters_true': n_clusters_true,
-        'n_clusters_pred': n_clusters_pred,
-        'overall_purity': overall_purity,
-        'cluster_purities': cluster_purities
-    }
-
-def main():
-    """
-    Main example function demonstrating GPU K-Means usage
-    """
-    # Set device
-    device = "cuda:0"
-     # Use torch.float32 for better performance, torch.bfloat16 for memory efficiency and speed
-    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32
-    print(f"Using device: {device}")
-    
-    if device == "cpu":
-        print("Warning: CUDA not available, running on CPU (will be slower)")
-    
-    start_time = time.time()
-
-    # Create dummy data
-    print("\n" + "="*50)
-    print("STEP 1: Creating dummy data")
-    print("="*50)
-    
-    # Float32 data of 10 million samples with 100 features takes 38GB on GPU
-    # Bfloat16 of the same size takes 27GB and runs 10x faster
-    X, y_true = create_dummy_data(
-        n_samples=20000000,
-        n_features=100,
-        n_clusters_true=128,
-        device=device,
-        random_state=42
+    # Example 1: K-means without dimensionality reduction
+    print("\n1. K-means without dimensionality reduction:")
+    kmeans_no_reduction = GPUKMeans(
+        n_clusters=10,
+        reducer_method=None,  # No reduction
+        device="cuda:0" if torch.cuda.is_available() else "cpu",
+        dtype=torch.float32
     )
     
-    # Initialize and train K-means
-    print("\n" + "="*50)
-    print("STEP 2: Training K-Means")
-    print("="*50)
+    kmeans_no_reduction.fit(X)
+    labels_no_reduction, _ = kmeans_no_reduction.predict(X)
+    print(f"   Clustering completed. Inertia: {kmeans_no_reduction.inertia_:.4f}")
     
-    kmeans = GPUKMeans(
-        n_clusters=5,
-        tol=1e-4,
-        random_state=42,
-        dtype=dtype, 
-        device=device
+    # Example 2: Using auto_dims_eigen_plot for dimension analysis
+    print("\n2. Eigenvalue analysis for optimal dimensions:")
+    
+    # Create a reducer for analysis
+    analyzer = Reducer(method='pca', dims=0)
+    
+    # Generate eigenvalue plot and get suggestions
+    plot_path = "/tmp/eigenvalue_analysis.png"
+    suggested_dims = analyzer.auto_dims_eigen_plot(X, plot_path, wandblogger=None)
+    print(f"   Eigenvalue analysis suggests: {suggested_dims} dimensions")
+    print(f"   Plot saved to: {plot_path}")
+    
+    # Example 3: K-means with PCA reduction (using suggested dimensions)
+    print(f"\n3. K-means with PCA reduction (using suggested {suggested_dims} dimensions):")
+    kmeans_pca_suggested = GPUKMeans(
+        n_clusters=10,
+        reducer_method='pca',
+        reducer_dims=suggested_dims,  # Use suggested dimensions
+        device="cuda:0" if torch.cuda.is_available() else "cpu",
+        dtype=torch.float32
     )
     
-    # Fit the model with normalization
-    kmeans.fit(X, normalize=True, max_iter=100)
+    kmeans_pca_suggested.fit(X)
+    labels_pca_suggested, _ = kmeans_pca_suggested.predict(X)
+    print(f"   Clustering completed. Inertia: {kmeans_pca_suggested.inertia_:.4f}")
+    if hasattr(kmeans_pca_suggested, 'reduction_info'):
+        print(f"   Reduced from {kmeans_pca_suggested.reduction_info['original_dims']} to {kmeans_pca_suggested.reduction_info['reduced_dims']} dimensions")
+        if 'explained_variance' in kmeans_pca_suggested.reduction_info:
+            print(f"   Explained variance: {kmeans_pca_suggested.reduction_info['explained_variance']:.1%}")
     
-    print(f"\nFinal inertia: {kmeans.inertia_:.4f}")
-    
-    # Make predictions on the same data
-    print("\n" + "="*50)
-    print("STEP 3: Making predictions")
-    print("="*50)
-    
-    y_pred, distances = kmeans.predict(X, return_dists=True)
-    
-    print(f"Predicted {len(y_pred)} samples")
-    print(f"Unique predicted clusters: {np.unique(y_pred)}")
-    print(f"Distance matrix shape: {distances.shape}")
-    
-    # Calculate clustering metrics
-    print("\n" + "="*50)
-    print("STEP 4: Evaluating clustering quality")
-    print("="*50)
-    
-    metrics = calculate_clustering_metrics(y_true, y_pred)
-    
-    print(f"Number of samples: {metrics['n_samples']}")
-    print(f"True number of clusters: {metrics['n_clusters_true']}")
-    print(f"Predicted number of clusters: {metrics['n_clusters_pred']}")
-    print(f"Overall clustering purity: {metrics['overall_purity']:.4f}")
-    
-    # Analyze feature importance
-    print("\n" + "="*50)
-    print("STEP 5: Feature importance analysis")
-    print("="*50)
-    
-    # Create feature names
-    feature_names = [f"Feature_{i:02d}" for i in range(X.shape[1])]
-    
-    # Get feature analysis
-    feature_analysis = kmeans.analyze_features(feature_names)
-    
-    print("Top 10 most important features:")
-    for i, (feature_name, importance) in enumerate(list(feature_analysis['global_importance'].items())[:10]):
-        print(f"{i+1:2d}. {feature_name}: {importance:.6f}")
-    
-    # Test prediction on new data
-    print("\n" + "="*50)
-    print("STEP 6: Testing on new data")
-    print("="*50)
-    
-    # Create small test set
-    X_test, y_test_true = create_dummy_data(
-        n_samples=1000,
-        n_features=100,
-        n_clusters_true=5,
-        device=device,
-        random_state=123  # Different seed
+    # Example 4: K-means with PCA reduction (auto dimensions - built-in analysis)
+    print("\n4. K-means with PCA reduction (auto dimensions - built-in analysis):")
+    kmeans_pca_auto = GPUKMeans(
+        n_clusters=10,
+        reducer_method='pca',
+        reducer_dims=0,  # Auto-select dimensions (uses internal analysis)
+        device="cuda:0" if torch.cuda.is_available() else "cpu",
+        dtype=torch.float32
     )
     
-    y_test_pred, _ = kmeans.predict(X_test)
-    test_metrics = calculate_clustering_metrics(y_test_true, y_test_pred)
+    kmeans_pca_auto.fit(X)
+    labels_pca_auto, _ = kmeans_pca_auto.predict(X)
+    print(f"   Clustering completed. Inertia: {kmeans_pca_auto.inertia_:.4f}")
+    if hasattr(kmeans_pca_auto, 'reduction_info'):
+        print(f"   Reduced from {kmeans_pca_auto.reduction_info['original_dims']} to {kmeans_pca_auto.reduction_info['reduced_dims']} dimensions")
+        if 'explained_variance' in kmeans_pca_auto.reduction_info:
+            print(f"   Explained variance: {kmeans_pca_auto.reduction_info['explained_variance']:.1%}")
     
-    print(f"Test set size: {len(y_test_pred)}")
-    print(f"Test set purity: {test_metrics['overall_purity']:.4f}")
+    # Example 5: K-means with PCA reduction (fixed dimensions)
+    print("\n5. K-means with PCA reduction (fixed 20 dimensions):")
+    kmeans_pca_fixed = GPUKMeans(
+        n_clusters=10,
+        reducer_method='pca',
+        reducer_dims=20,  # Fixed 20 dimensions
+        device="cuda:0" if torch.cuda.is_available() else "cpu",
+        dtype=torch.float32
+    )
     
-    # Save and load model
-    print("\n" + "="*50)
-    print("STEP 7: Saving and loading model")
-    print("="*50)
+    kmeans_pca_fixed.fit(X)
+    labels_pca_fixed, _ = kmeans_pca_fixed.predict(X)
+    print(f"   Clustering completed. Inertia: {kmeans_pca_fixed.inertia_:.4f}")
     
-    model_dir = "./kmeans_model"
-    kmeans.save_model(model_dir)
+    # Example 6: K-means with UMAP reduction
+    print("\n6. K-means with UMAP reduction (15 dimensions):")
+    try:
+        kmeans_umap = GPUKMeans(
+            n_clusters=10,
+            reducer_method='umap',
+            reducer_dims=15,
+            device="cuda:0" if torch.cuda.is_available() else "cpu",
+            dtype=torch.float32
+        )
+        
+        kmeans_umap.fit(X)
+        labels_umap, _ = kmeans_umap.predict(X)
+        print(f"   Clustering completed. Inertia: {kmeans_umap.inertia_:.4f}")
+    except ImportError:
+        print("   UMAP not available. Install with: pip install umap-learn")
     
-    # Load model
-    kmeans_loaded = GPUKMeans.load_model(model_dir, device=device)
+    # Example 7: Save and load model
+    print("\n7. Save and load model:")
+    model_dir = "/tmp/kmeans_model_test"
+    kmeans_pca_fixed.save_model(model_dir)
     
-    # Test loaded model
-    y_pred_loaded, _ = kmeans_loaded.predict(X_test[:100])  # Test on first 100 samples
+    # Load the model
+    loaded_model = GPUKMeans.load_model(
+        model_dir, 
+        device="cuda:0" if torch.cuda.is_available() else "cpu"
+    )
     
-    # Check if predictions match
-    y_pred_original, _ = kmeans.predict(X_test[:100])
-    predictions_match = np.array_equal(y_pred_loaded, y_pred_original)
+    # Test prediction with loaded model
+    test_labels, _ = loaded_model.predict(X[:100])  # Test on first 100 samples
+    print(f"   Model loaded and tested successfully. Predicted {len(test_labels)} labels.")
     
-    print(f"Loaded model predictions match original: {predictions_match}")
-    
-    # Memory usage info
-    print("\n" + "="*50)
-    print("STEP 8: Memory usage summary")
-    print("="*50)
-    
-    if torch.cuda.is_available():
-        memory_allocated = torch.cuda.memory_allocated(device) / 1024**3
-        memory_reserved = torch.cuda.memory_reserved(device) / 1024**3
-        print(f"GPU memory allocated: {memory_allocated:.2f} GB")
-        print(f"GPU memory reserved: {memory_reserved:.2f} GB")
-    
-    print(f"Data tensor size: {X.element_size() * X.nelement() / 1024**3:.2f} GB")
-    print(f"Cluster centers size: {kmeans.cluster_centers_.element_size() * kmeans.cluster_centers_.nelement() / 1024:.2f} KB")
-    
+    # Example 8: Feature importance analysis
+    print("\n8. Feature importance analysis:")
+    feature_analysis = kmeans_pca_fixed.analyze_features()
+    print("   Top 5 most important features:")
+    for i, (feature, importance) in enumerate(list(feature_analysis['global_importance'].items())[:5]):
+        print(f"     {i+1}. {feature}: {importance:.4f}")
 
-    total_time = time.time() - start_time   
-    print(f"\nTotal execution time: {total_time:.2f} seconds")
-    print("\n" + "="*50)
-    print("Example completed successfully!")
-    print("="*50)
+def advanced_usage_with_eigen_analysis():
+    """
+    Advanced example showing detailed eigenvalue analysis workflow
+    """
+    print("\n=== Advanced Eigenvalue Analysis Workflow ===")
     
+    # Generate more complex synthetic data
+    np.random.seed(42)
+    n_samples = 800
+    n_features = 150
+    
+    # Create data with different variance patterns
+    # First 50 features: high variance signal
+    signal_features = np.random.randn(n_samples, 50) * 2.0
+    # Next 50 features: medium variance
+    medium_features = np.random.randn(n_samples, 50) * 0.8
+    # Last 50 features: low variance noise
+    noise_features = np.random.randn(n_samples, 50) * 0.2
+    
+    X_complex = np.hstack([signal_features, medium_features, noise_features])
+    print(f"Complex data shape: {X_complex.shape}")
+    
+    # Step 1: Perform detailed eigenvalue analysis
+    print("\n1. Detailed eigenvalue analysis:")
+    analyzer = Reducer(method='pca', dims=0)
+    
+    # Create plot with detailed analysis
+    plot_path = "/tmp/detailed_eigenvalue_analysis.png"
+    suggested_dims = analyzer.auto_dims_eigen_plot(
+        X_complex, 
+        plot_path, 
+        wandblogger=None  # You can pass your wandb logger here
+    )
+    
+    print(f"   📊 Eigenvalue analysis complete!")
+    print(f"   📈 Plot saved to: {plot_path}")
+    print(f"   🎯 Suggested dimensions: {suggested_dims}")
+    
+    # Step 2: Compare different dimension choices
+    print("\n2. Comparing different dimension choices:")
+    
+    dimension_choices = [
+        ("Conservative (25% of original)", max(10, X_complex.shape[1] // 4)),
+        ("Suggested (eigenvalue analysis)", suggested_dims),
+        ("Aggressive (10% of original)", max(5, X_complex.shape[1] // 10)),
+    ]
+    
+    results = []
+    
+    for name, dims in dimension_choices:
+        print(f"\n   Testing {name}: {dims} dimensions")
+        
+        kmeans = GPUKMeans(
+            n_clusters=15,
+            reducer_method='pca',
+            reducer_dims=dims,
+            device="cuda:0" if torch.cuda.is_available() else "cpu",
+            dtype=torch.float32
+        )
+        
+        kmeans.fit(X_complex)
+        
+        results.append({
+            'name': name,
+            'dims': dims,
+            'inertia': kmeans.inertia_,
+            'explained_variance': kmeans.reduction_info.get('explained_variance', 0)
+        })
+        
+        print(f"     ✓ Inertia: {kmeans.inertia_:.4f}")
+        if 'explained_variance' in kmeans.reduction_info:
+            print(f"     ✓ Explained variance: {kmeans.reduction_info['explained_variance']:.1%}")
+    
+    # Step 3: Summary of results
+    print("\n3. Summary of dimension choice comparison:")
+    print("   " + "="*70)
+    print(f"   {'Method':<35} {'Dims':<8} {'Inertia':<12} {'Var Explained'}")
+    print("   " + "="*70)
+    
+    for result in results:
+        var_explained = f"{result['explained_variance']:.1%}" if result['explained_variance'] > 0 else "N/A"
+        print(f"   {result['name']:<35} {result['dims']:<8} {result['inertia']:<12.4f} {var_explained}")
+    
+    print("   " + "="*70)
+    
+    # Step 4: Recommendation
+    best_result = min(results, key=lambda x: x['inertia'])
+    print(f"\n4. Recommendation:")
+    print(f"   🏆 Best performing: {best_result['name']} ({best_result['dims']} dims)")
+    print(f"   📉 Lowest inertia: {best_result['inertia']:.4f}")
+    if best_result['explained_variance'] > 0:
+        print(f"   📊 Variance explained: {best_result['explained_variance']:.1%}")
+    
+    return suggested_dims
 
+def advanced_usage_with_your_training_method():
+    """
+    Example showing how to integrate with your existing training method
+    """
+    print("\n=== Advanced Usage - Integration with Training Method ===")
+    
+    # This mimics your training method structure
+    class MockFeaturesCollation:
+        def __init__(self, features):
+            self.features = features
+    
+    # Generate mock data
+    np.random.seed(42)
+    features = np.random.randn(500, 80)  # 500 samples, 80 features
+    features_collation = MockFeaturesCollation(features)
+    
+    # Step 1: Perform eigenvalue analysis first (like in your train method)
+    print("1. Performing eigenvalue analysis for optimal dimensions...")
+    analyzer = Reducer(method='pca', dims=0)
+    plot_path = "/tmp/training_eigenvalue_analysis.png"
+    auto_dims_suggestion = analyzer.auto_dims_eigen_plot(
+        features_collation.features, 
+        plot_path, 
+        wandblogger=None  # Pass your wandb logger here
+    )
+    
+    print(f"   📊 Eigenvalue analysis suggests: {auto_dims_suggestion} dimensions")
+    print(f"   📈 Analysis plot saved to: {plot_path}")
+    
+    # Step 2: Create clustering model with suggested dimensions
+    print(f"\n2. Training clustering model with suggested {auto_dims_suggestion} dimensions...")
+    clustering_model = GPUKMeans(
+        n_clusters=20,
+        reducer_method='pca',
+        reducer_dims=auto_dims_suggestion,  # Use the suggested dimensions
+        device="cuda:0" if torch.cuda.is_available() else "cpu",
+        dtype=torch.float32
+    )
+    
+    # Train the model
+    clustering_model.fit(
+        features_collation.features,
+        normalize=True,
+        max_iter=100
+    )
+    
+    # Step 3: Save model and reduction info (similar to your train method)
+    model_dir = "/tmp/clustering_model_advanced"
+    clustering_model.save_model(model_dir)
+    
+    # The reduction info is automatically saved in the model
+    if hasattr(clustering_model, 'reduction_info'):
+        print(f"\n3. Reduction info saved:")
+        for key, value in clustering_model.reduction_info.items():
+            print(f"   {key}: {value}")
+    
+    # Step 4: Demonstrate loading and using the model
+    print(f"\n4. Loading and testing the saved model...")
+    loaded_model = GPUKMeans.load_model(model_dir)
+    
+    # Test with new data
+    test_features = np.random.randn(50, 80)  # Same feature dimension as training
+    test_labels, _ = loaded_model.predict(test_features)
+    print(f"   ✓ Successfully predicted labels for {len(test_labels)} test samples")
+    
+    print("Advanced training example completed successfully!")
+    
+    return auto_dims_suggestion
 
 if __name__ == "__main__":
-
-    main()
+    example_usage()
+    suggested_dims = advanced_usage_with_eigen_analysis()
+    final_suggestion = advanced_usage_with_your_training_method()
+    
+    print(f"\n=== Final Summary ===")
+    print(f"🎯 Eigenvalue analysis suggested: {suggested_dims} dimensions for complex data")
+    print(f"🎯 Training method suggested: {final_suggestion} dimensions for training data")
+    print("📊 Use auto_dims_eigen_plot() to get data-driven dimension suggestions!")
+    print("💡 Tip: Always analyze your specific dataset to determine optimal dimensions")
