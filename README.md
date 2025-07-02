@@ -1,4 +1,4 @@
-# GPU K-means Clustering with Dimensionality Reduction
+# GPU K-means Clustering with Dimensionality Reduction (2025)
 
 High-performance K-means clustering implementation with **integrated dimensionality reduction**, GPU acceleration, and mixed-precision support. Achieve **10x+ speedup** over CPU implementations while using **30% less memory** with bfloat16 precision, plus intelligent dimension reduction for better clustering quality.
 
