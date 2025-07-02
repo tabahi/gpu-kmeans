@@ -486,7 +486,7 @@ Run the included examples:
 
 ```bash
 # Comprehensive usage examples
-python usage_example.py
+python dummy_example.py
 
 # Performance benchmarks
 python benchmark_comparison.py
