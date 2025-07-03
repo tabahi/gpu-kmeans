@@ -641,22 +641,4 @@ kmeans = GPUKMeans(
 
 
 
-## 🙏 Acknowledgments
-
-- Scikit-learn for PCA implementation
-- UMAP library for non-linear reduction
-- Claude Sonnet 4 wrote this README and dummy examples
-
----
-
-**⚡ Quick Start Summary:**
-```python
-# The simplest way to get excellent results
-from gpu_kmeans import GPUKMeans
-
-kmeans = GPUKMeans(n_clusters=20, reducer_method='pca', reducer_dims=0)
-kmeans.fit(your_high_dimensional_data, normalize=True)
-labels, _ = kmeans.predict(new_data)
-```
-
-> 💡 **Pro Tip**: For high-dimensional data (>50 features), always use dimensionality reduction. It's not just faster—it usually produces better clusters!
+ata (>50 features), always use dimensionality reduction. It's not just faster—it usually produces better clusters!
